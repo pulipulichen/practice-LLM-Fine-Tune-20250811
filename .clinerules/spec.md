@@ -27,6 +27,8 @@ Gemma 3n (4B) 以 Unsloth 微調的「內容→標題」生成模型，並以 Ol
 
 ```
 project/
+├─ .env
+├─ .env.example
 ├─ docker/
 │  ├─ compose.ollama.yml
 │  ├─ Dockerfile.train.unsloth
@@ -44,7 +46,7 @@ project/
 │     ├─ Modelfile.template
 │     ├─ Modelfile  # 由 Modelfile.template 替換變數後生成
 │     └─ prompt_templates/
-└─ docs/
+└─ .clinerules/
    └─ spec.md
 ```
 
@@ -122,6 +124,14 @@ volumes:
 HF_TOKEN=hf_xxx_your_token_here
 HF_ORG=your-hf-org-or-username
 HF_REPO=gemma3n-4b-zh-titlegen
+```
+
+### `.env.example`
+
+請複製 `.env.example` 為 `.env` 並填入你的 Hugging Face Token、組織/使用者名稱與模型儲存庫名稱。
+
+```bash
+cp .env.example .env
 ```
 
 ---
