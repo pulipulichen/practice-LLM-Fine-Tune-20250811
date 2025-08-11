@@ -7,12 +7,12 @@ from trl import SFTTrainer
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=str, default="google/gemma-3n-4b", help="Base model name")
-    parser.add_argument("--out", type=str, default="./training/outputs/gemma3n-4b-title-lora", help="Output directory for LoRA model")
+    parser.add_argument("--base", type=str, default=os.getenv("BASE_MODEL_NAME", "google/gemma-3n-4b"), help="Base model name")
+    parser.add_argument("--out", type=str, default=os.getenv("LORA_MODEL_PATH", "./training/outputs/gemma3n-4b-title-lora"), help="Output directory for LoRA model")
     parser.add_argument("--proc", type=str, default="./training/processed", help="Processed dataset directory")
     args = parser.parse_args()
 
-    base = os.environ.get("BASE_MODEL", args.base)
+    base = args.base
     max_seq_len = 2048
     lora_r, lora_alpha, lora_dropout = 16, 32, 0.05
 

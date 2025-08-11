@@ -10,8 +10,8 @@ from transformers import AutoTokenizer
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=str, default="google/gemma-3n-4b", help="Base model name")
-    parser.add_argument("--lora", type=str, default="./training/outputs/gemma3n-4b-title-lora", help="Path to LoRA model")
+    parser.add_argument("--base", type=str, default=os.getenv("BASE_MODEL_NAME", "google/gemma-3n-4b"), help="Base model name")
+    parser.add_argument("--lora", type=str, default=os.getenv("LORA_MODEL_PATH", "./training/outputs/gemma3n-4b-title-lora"), help="Path to LoRA model")
     parser.add_argument("--out", type=str, default="./training/outputs/final-hf", help="Output directory for merged HF model")
     args = parser.parse_args()
 

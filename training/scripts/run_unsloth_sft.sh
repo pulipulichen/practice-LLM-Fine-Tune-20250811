@@ -1,6 +1,17 @@
 set -euo pipefail
-BASE="google/gemma-3n-4b"   # 依實際 HF 名稱調整
-OUT="./training/outputs/gemma3n-4b-title-lora"
+
+# 載入 .env 檔案中的環境變數
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+fi
+
+# 檢查必要的環境變數是否已設定
+: "${BASE:?Error: BASE environment variable not set.}"
+: "${OUT:?Error: OUT environment variable not set.}"
+
+# 依實際 HF 名稱調整
+# BASE="google/gemma-3n-4b"
+# OUT="./training/outputs/gemma3n-4b-title-lora"
 PROC="./training/processed"  # 由 prepare_dataset.py 產出
 
 python training/scripts/prepare_dataset.py --out $PROC

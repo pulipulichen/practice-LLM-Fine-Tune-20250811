@@ -31,7 +31,6 @@ project/
 │  ├─ compose.ollama.yml
 │  ├─ Dockerfile.train.unsloth
 │  ├─ Dockerfile.tools
-│  └─ .env.example
 ├─ training/
 │  ├─ scripts/
 │  │  ├─ run_unsloth_sft.sh
@@ -117,7 +116,7 @@ volumes:
   ollama:
 ```
 
-### `.env.example`
+### `.env`
 
 ```
 HF_TOKEN=hf_xxx_your_token_here
@@ -382,6 +381,7 @@ curl http://localhost:11434/api/generate -d '{
 
 * [ ] `.env` 中已正確設定 `HF_TOKEN`、`HF_ORG`、`HF_REPO`
 * [ ] **已確認 `google/gemma-3n-4b` 或等效模型名稱在 Hugging Face Hub 上為有效且可存取**
+* [ ] 已新增 `.gitignore` 規則，排除 `.env`
 * [ ] 已建立 `datasets/` 並放置經過清理與切分的訓練/驗證資料集
 * [ ] GPU 驅動與 NVIDIA Container Toolkit 已安裝並可在容器內使用 `nvidia-smi`
 
