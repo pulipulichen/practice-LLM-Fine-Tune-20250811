@@ -23,110 +23,16 @@ Gemma 3n (4B) 以 Unsloth 微調的「內容→標題」生成模型，並以 Ol
 * **匯出**：合併 LoRA 權重並輸出 HF 標準結構（safetensors），推送至 HF。
 * **推論**：Ollama 以 `FROM hf://<ORG>/<REPO>` 讀取你上傳的最終模型；提供 REST 介面。
 
-### 目錄結構
-
-```
-project/
-├─ .env
-├─ .env.example
-├─ docker/
-│  ├─ compose.ollama.yml
-│  ├─ Dockerfile.train.unsloth
-│  ├─ Dockerfile.tools
-├─ training/
-│  ├─ scripts/
-│  │  ├─ run_unsloth_sft.sh
-│  │  ├─ prepare_dataset.py
-│  │  ├─ export_merged_hf_unsloth.py
-│  │  └─ upload_to_hf.py
-│  └─ outputs/
-│     └─ final-hf/
-├─ serving/
-│  └─ ollama/
-│     ├─ Modelfile.template
-│     ├─ Modelfile  # 由 Modelfile.template 替換變數後生成
-│     └─ prompt_templates/
-└─ .clinerules/
-   └─ spec.md
-```
-
 ---
 
 ## Docker Compose（訓練→部署）
 
 `docker/compose.ollama.yml`
-
-```yaml
-services:
-  trainer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.train.unsloth
-    environment:
-      - CUDA_VISIBLE_DEVICES=0
-      - HF_HOME=/opt/hf
-      - HF_TOKEN=${HF_TOKEN}
-      - WANDB_DISABLED=true
-    volumes:
-      - ../training:/workspace/training
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
-    command: ["bash","/workspace/training/scripts/run_unsloth_sft.sh"]
-    profiles: ["train"]
-
-  tools:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.tools
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - HF_ORG=${HF_ORG}
-      - HF_REPO=${HF_REPO}
-    volumes:
-      - ../training/outputs/final-hf:/artifacts/final-hf:ro
-      - ../training/scripts:/tools/scripts:ro
-      - ../serving/ollama:/serving_ollama:rw # 新增：讓 tools 服務可以寫入 Modelfile
-    command: ["bash", "-c", "envsubst < /serving_ollama/Modelfile.template > /serving_ollama/Modelfile && python /tools/upload_to_hf.py"] # 修改：先執行 envsubst 再上傳
-    profiles: ["tools"]
-
-  ollama:
-    image: ollama/ollama:latest
-    runtime: nvidia
-    environment:
-      - OLLAMA_NUM_PARALLEL=2
-      - OLLAMA_KEEP_ALIVE=30m
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
-    volumes:
-      - ollama:/root/.ollama
-      - ../serving/ollama:/models:rw
-    ports: ["11434:11434"]
-    healthcheck:
-      test: ["CMD", "ollama", "--version"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    profiles: ["serve"]
-
-volumes:
-  ollama:
-```
-
-### `.env`
-
-```
-HF_TOKEN=hf_xxx_your_token_here
-HF_ORG=your-hf-org-or-username
-HF_REPO=gemma3n-4b-zh-titlegen
 ```
 
 ### `.env.example`
+
+### `.env.`
 
 請複製 `.env.example` 為 `.env` 並填入你的 Hugging Face Token、組織/使用者名稱與模型儲存庫名稱。
 
@@ -140,137 +46,13 @@ cp .env.example .env
 
 `docker/Dockerfile.train.unsloth`
 
-```Dockerfile
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu24.04
-RUN apt-get update && apt-get install -y python3-pip git && rm -rf /var/lib/apt/lists/*
-RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-RUN pip3 install --no-cache-dir unsloth transformers datasets peft bitsandbytes accelerate sentencepiece evaluate rouge-score huggingface_hub
-WORKDIR /workspace
-```
-
-`training/scripts/prepare_dataset.py`（摘要）
-
-```python
-# 下載 AWeirdDev/zh-tw-pts-articles-sm，抽取 (content -> title)
-# 清理：移除多餘空白、控制最大長度（content 例如 1536~2048 tokens；title 64 tokens）
-# 產生 train/val/test 的 JSONL 或 HF DatasetDict 儲存於 /workspace/training/processed/
-```
+`training/scripts/prepare_dataset.py`
 
 `training/scripts/run_unsloth_sft.sh`
 
-```bash
-set -euo pipefail
-BASE="google/gemma-3n-4b"   # 依實際 HF 名稱調整
-OUT="./training/outputs/gemma3n-4b-title-lora"
-PROC="./training/processed"  # 由 prepare_dataset.py 產出
+`training/scripts/export_merged_hf_unsloth.py`
 
-python training/scripts/prepare_dataset.py --out $PROC
-
-python training/scripts/train_unsloth_sft.py \
-  --base $BASE \
-  --out $OUT \
-  --proc $PROC
-
-# 合併 LoRA -> HF 目錄
-python training/scripts/export_merged_hf_unsloth.py \
-  --base $BASE \
-  --lora $OUT \
-  --out ./training/outputs/final-hf
-```
-
-`training/scripts/export_merged_hf_unsloth.py`（摘要）
-
-```python
-# 使用 Unsloth / PEFT 將 LoRA 權重 merge_and_unload，
-# 寫出 HF 結構（config.json / tokenizer.* / model.safetensors）到 final-hf。
-```
-
-`training/scripts/train_unsloth_sft.py`（摘要）
-
-```python
-from unsloth import FastLanguageModel
-from datasets import load_dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
-import os
-import argparse
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=str, default="google/gemma-3n-4b", help="Base model name")
-    parser.add_argument("--out", type=str, default="./training/outputs/gemma3n-4b-title-lora", help="Output directory for LoRA model")
-    parser.add_argument("--proc", type=str, default="./training/processed", help="Processed dataset directory")
-    args = parser.parse_args()
-
-    base = os.environ.get("BASE_MODEL", args.base)
-    max_seq_len = 2048
-    lora_r, lora_alpha, lora_dropout = 16, 32, 0.05
-
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = base,
-        max_seq_length = max_seq_len,
-        load_in_4bit = True,
-        dtype = None,
-    )
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r = lora_r,
-        lora_alpha = lora_alpha,
-        lora_dropout = lora_dropout,
-        target_modules = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],
-    )
-
-    dset = load_dataset("json", data_files={
-        "train": os.path.join(args.proc, "train.jsonl"),
-        "validation": os.path.join(args.proc, "val.jsonl")
-    })
-
-    # 將 (content -> title) 序列化為單輪指令格式
-    def format_row(row):
-        sys = "你是精煉新聞標題的助理，回覆僅輸出標題，不需解釋。"
-        prompt = f"請將以下內容濃縮成新聞標題：\n{row['content']}"
-        out = row["title"]
-        return {
-            "prompt": f"<|system|>\n{sys}\n<|user|>\n{prompt}\n<|assistant|>\n",
-            "response": out
-        }
-
-    for split in ["train","validation"]:
-        dset[split] = dset[split].map(format_row, remove_columns=dset[split].column_names)
-
-    training_output_dir = args.out
-    args = TrainingArguments(
-        output_dir = training_output_dir,
-        per_device_train_batch_size = 4,
-        gradient_accumulation_steps = 8,
-        learning_rate = 2e-4,
-        num_train_epochs = 3,
-        lr_scheduler_type = "cosine",
-        warmup_ratio = 0.03,
-        logging_steps = 20,
-        save_steps = 500,
-        bf16 = True,
-        fp16 = False,
-    )
-
-    trainer = SFTTrainer(
-        model = model,
-        tokenizer = tokenizer,
-        train_dataset = dset["train"],
-        eval_dataset = dset["validation"],
-        dataset_text_field = None,
-        max_seq_length = max_seq_len,
-        packing = True,
-        args = args,
-        formatting_func = lambda batch: [p+ r for p, r in zip(batch["prompt"], batch["response"])],
-    )
-
-    trainer.train()
-    trainer.save_model(training_output_dir)
-
-if __name__ == "__main__":
-    main()
-```
+`training/scripts/train_unsloth_sft.py`
 
 ### 評測（摘錄）
 
@@ -284,39 +66,7 @@ if __name__ == "__main__":
 
 `docker/Dockerfile.tools`
 
-```Dockerfile
-FROM python:3.11-slim
-RUN apt-get update && apt-get install -y gettext-base && rm -rf /var/lib/apt/lists/* # 新增：安裝 gettext-base 以提供 envsubst
-RUN pip install --no-cache-dir huggingface_hub==0.24.*
-WORKDIR /tools
-COPY training/scripts/upload_to_hf.py /tools/upload_to_hf.py
-# CMD ["python","/tools/upload_to_hf.py"] # 已由 docker-compose.yml 中的 command 覆寫
-```
-
 `training/scripts/upload_to_hf.py`
-
-```python
-import os
-from huggingface_hub import HfApi, create_repo, upload_folder
-
-token = os.environ["HF_TOKEN"]
-org = os.environ["HF_ORG"]
-repo = os.environ["HF_REPO"]
-local_dir = "/artifacts/final-hf"
-
-api = HfApi(token=token)
-repo_id = f"{org}/{repo}"
-create_repo(repo_id, token=token, repo_type="model", exist_ok=True, private=True)
-
-upload_folder(
-    repo_id=repo_id,
-    folder_path=local_dir,
-    path_in_repo="",
-    repo_type="model",
-    commit_message="Upload merged LoRA -> HF format (Gemma 3n 4B title generation)"
-)
-print(f"Uploaded {local_dir} to https://huggingface.co/{repo_id}")
-```
 
 **執行順序**
 
@@ -333,23 +83,6 @@ docker compose -f docker/compose.ollama.yml --profile tools up --build tools
 ## 推論部署（Ollama）
 
 `serving/ollama/Modelfile.template`
-
-```
-# 若使用你上傳到 HF 的模型
-FROM hf://{{HF_ORG}}/{{HF_REPO}}
-PARAMETER temperature 0.3
-PARAMETER num_ctx 4096
-TEMPLATE """
-{{ if .System }}<|system|>
-{{ .System }}
-{{ end }}
-<|user|>
-請將以下內容濃縮成一則新聞標題（僅輸出標題）：
-{{ .Prompt }}
-<|assistant|>
-"""
-SYSTEM "你是精煉新聞標題的助理，回覆僅輸出標題，不需解釋。"
-```
 
 **建立與測試**
 
