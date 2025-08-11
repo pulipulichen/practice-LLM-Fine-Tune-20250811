@@ -1,6 +1,6 @@
 {
-    "script": {
-        "start": "1.train.sh",
-        "inference": "2.inference.sh"
+    "scripts": {
+        "start": "./1.train.sh",
+        "inference": "./2.inference.sh"
     }
 }
