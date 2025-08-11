@@ -42,7 +42,8 @@ project/
 │     └─ final-hf/
 ├─ serving/
 │  └─ ollama/
-│     ├─ Modelfile
+│     ├─ Modelfile.template
+│     ├─ Modelfile  # 由 Modelfile.template 替換變數後生成
 │     └─ prompt_templates/
 └─ docs/
    └─ spec.md
@@ -86,6 +87,8 @@ services:
     volumes:
       - ../training/outputs/final-hf:/artifacts/final-hf:ro
       - ../training/scripts:/tools/scripts:ro
+      - ../serving/ollama:/serving_ollama:rw # 新增：讓 tools 服務可以寫入 Modelfile
+    command: ["bash", "-c", "envsubst < /serving_ollama/Modelfile.template > /serving_ollama/Modelfile && python /tools/upload_to_hf.py"] # 修改：先執行 envsubst 再上傳
     profiles: ["tools"]
 
   ollama:
@@ -94,8 +97,6 @@ services:
     environment:
       - OLLAMA_NUM_PARALLEL=2
       - OLLAMA_KEEP_ALIVE=30m
-      - HF_ORG=${HF_ORG}
-      - HF_REPO=${HF_REPO}
     deploy:
       resources:
         reservations:
@@ -103,7 +104,7 @@ services:
             - capabilities: ["gpu"]
     volumes:
       - ollama:/root/.ollama
-      - ../serving/ollama:/models:ro
+      - ../serving/ollama:/models:rw
     ports: ["11434:11434"]
     healthcheck:
       test: ["CMD", "ollama", "--version"]
@@ -276,10 +277,11 @@ if __name__ == "__main__":
 
 ```Dockerfile
 FROM python:3.11-slim
+RUN apt-get update && apt-get install -y gettext-base && rm -rf /var/lib/apt/lists/* # 新增：安裝 gettext-base 以提供 envsubst
 RUN pip install --no-cache-dir huggingface_hub==0.24.*
 WORKDIR /tools
 COPY training/scripts/upload_to_hf.py /tools/upload_to_hf.py
-CMD ["python","/tools/upload_to_hf.py"]
+# CMD ["python","/tools/upload_to_hf.py"] # 已由 docker-compose.yml 中的 command 覆寫
 ```
 
 `training/scripts/upload_to_hf.py`
@@ -321,7 +323,7 @@ docker compose -f docker/compose.ollama.yml --profile tools up --build tools
 
 ## 推論部署（Ollama）
 
-`serving/ollama/Modelfile`
+`serving/ollama/Modelfile.template`
 
 ```
 # 若使用你上傳到 HF 的模型
@@ -347,6 +349,7 @@ SYSTEM "你是精煉新聞標題的助理，回覆僅輸出標題，不需解釋
 sudo docker compose -f docker/compose.ollama.yml --profile serve up -d ollama
 
 # 4) 在主機上匯入模型
+# 透過 envsubst 替換 Modelfile 中的變數，並建立模型
 sudo docker exec -it $(docker ps -qf name=ollama) bash -lc "ollama create zh-titlegen -f /models/Modelfile"
 
 # 5) 呼叫推論
@@ -378,6 +381,7 @@ curl http://localhost:11434/api/generate -d '{
 ### 資料與環境準備
 
 * [ ] `.env` 中已正確設定 `HF_TOKEN`、`HF_ORG`、`HF_REPO`
+* [ ] **已確認 `google/gemma-3n-4b` 或等效模型名稱在 Hugging Face Hub 上為有效且可存取**
 * [ ] 已建立 `datasets/` 並放置經過清理與切分的訓練/驗證資料集
 * [ ] GPU 驅動與 NVIDIA Container Toolkit 已安裝並可在容器內使用 `nvidia-smi`
 
