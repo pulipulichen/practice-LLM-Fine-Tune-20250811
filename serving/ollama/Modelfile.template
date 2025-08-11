@@ -1,0 +1,14 @@
+# 若使用你上傳到 HF 的模型
+FROM hf://{{HF_ORG}}/{{HF_REPO}}
+PARAMETER temperature 0.3
+PARAMETER num_ctx 4096
+TEMPLATE """
+{{ if .System }}<|system|>
+{{ .System }}
+{{ end }}
+<|user|>
+請將以下內容濃縮成一則新聞標題（僅輸出標題）：
+{{ .Prompt }}
+<|assistant|>
+"""
+SYSTEM "你是精煉新聞標題的助理，回覆僅輸出標題，不需解釋。"

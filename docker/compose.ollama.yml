@@ -1,0 +1,59 @@
+services:
+  trainer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.train.unsloth
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - HF_HOME=/opt/hf
+      - HF_TOKEN=${HF_TOKEN}
+      - WANDB_DISABLED=true
+    volumes:
+      - ../training:/workspace/training
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+    command: ["bash","/workspace/training/scripts/run_unsloth_sft.sh"]
+    profiles: ["train"]
+
+  tools:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.tools
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_ORG=${HF_ORG}
+      - HF_REPO=${HF_REPO}
+    volumes:
+      - ../training/outputs/final-hf:/artifacts/final-hf:ro
+      - ../training/scripts:/tools/scripts:ro
+      - ../serving/ollama:/serving_ollama:rw # 新增：讓 tools 服務可以寫入 Modelfile
+    command: ["bash", "-c", "envsubst < /serving_ollama/Modelfile.template > /serving_ollama/Modelfile && python /tools/upload_to_hf.py"] # 修改：先執行 envsubst 再上傳
+    profiles: ["tools"]
+
+  ollama:
+    image: ollama/ollama:latest
+    runtime: nvidia
+    environment:
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_KEEP_ALIVE=30m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+    volumes:
+      - ollama:/root/.ollama
+      - ../serving/ollama:/models:rw
+    ports: ["11434:11434"]
+    healthcheck:
+      test: ["CMD", "ollama", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    profiles: ["serve"]
+
+volumes:
+  ollama:

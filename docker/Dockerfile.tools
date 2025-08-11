@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y gettext-base && rm -rf /var/lib/apt/lists/* # 新增：安裝 gettext-base 以提供 envsubst
+RUN pip install --no-cache-dir huggingface_hub==0.24.*
+WORKDIR /tools
+COPY training/scripts/upload_to_hf.py /tools/upload_to_hf.py
+# CMD ["python","/tools/upload_to_hf.py"] # 已由 docker-compose.yml 中的 command 覆寫
